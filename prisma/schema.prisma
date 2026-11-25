@@ -1,0 +1,98 @@
+// Gentle Days: data model (PostgreSQL via Neon or Supabase, using Prisma)
+// Tip: pin Prisma to v6 in package.json so this classic schema layout works as written.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")   // pooled connection string
+  directUrl = env("DIRECT_URL")     // direct connection, used for migrations
+}
+
+// One row per person who signs up.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique                 // required, must look like an email
+  passwordHash String                           // required, never store the real password
+  displayName  String?                          // optional, max 40 chars
+  createdAt    DateTime @default(now())
+
+  symptoms     Symptom[]
+  entries      Entry[]
+  todos        Todo[]
+  notes        StickyNote[]
+}
+
+// A symptom the user tracks (Headache, Fatigue...). Presets are copied in at sign-up,
+// so each user can rename, recolour or delete their own without affecting anyone else.
+model Symptom {
+  id        String   @id @default(uuid())
+  userId    String
+  name      String                              // required, 1-40 chars, unique per user
+  color     String                              // required, hex like #6c6fa3
+  sortOrder Int      @default(0)                // order shown in the log panel
+  createdAt DateTime @default(now())
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  logs      EntrySymptom[]
+
+  @@unique([userId, name])
+}
+
+// One row per user per calendar day. Holds the mood, the note and whether it has been saved.
+model Entry {
+  id        String   @id @default(uuid())
+  userId    String
+  date      DateTime @db.Date                   // required, the calendar day
+  mood      Int?                                // optional, 1 (rough) to 5 (great)
+  note      String?                             // optional, up to 2000 chars
+  isSaved   Boolean  @default(false)            // true once "Save entry" is pressed
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  symptoms  EntrySymptom[]
+
+  @@unique([userId, date])                      // only one entry per day
+}
+
+// Links an entry to a symptom and stores the severity. This is the table behind
+// the calendar dots and the 30-day patterns.
+model EntrySymptom {
+  id        String @id @default(uuid())
+  entryId   String
+  symptomId String
+  severity  Int                                 // required, 1 to 5
+
+  entry     Entry   @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  symptom   Symptom @relation(fields: [symptomId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, symptomId])                // a symptom appears once per day
+  @@index([symptomId])
+}
+
+// The green to-do pad.
+model Todo {
+  id        String   @id @default(uuid())
+  userId    String
+  text      String                              // required, 1-200 chars
+  isDone    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// The three sticky notes: slot 0, 1 or 2.
+model StickyNote {
+  id        String   @id @default(uuid())
+  userId    String
+  slot      Int                                 // required, 0 to 2
+  text      String   @default("")               // up to 300 chars
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, slot])
+}
